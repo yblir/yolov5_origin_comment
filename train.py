@@ -25,6 +25,7 @@ import time
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
+import warnings
 
 try:
     import comet_ml  # must be imported before torch (if installed)
@@ -72,12 +73,12 @@ LOCAL_RANK = int(os.getenv('LOCAL_RANK', -1))  # 这个 Worker 是这台机器�
 RANK = int(os.getenv('RANK', -1))  # 这个 Worker 是全局第几个 Worker
 WORLD_SIZE = int(os.getenv('WORLD_SIZE', 1))  # 总共有几个 Worker
 GIT_INFO = check_git_info()
-
+warnings.filterwarnings('ignore')
 
 def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictionary
     save_dir, epochs, batch_size, weights, single_cls, evolve, data, cfg, resume, noval, nosave, workers, freeze = \
         Path(opt.save_dir), opt.epochs, opt.batch_size, opt.weights, opt.single_cls, opt.evolve, opt.data, opt.cfg, \
-        opt.resume, opt.noval, opt.nosave, opt.workers, opt.freeze
+            opt.resume, opt.noval, opt.nosave, opt.workers, opt.freeze
     callbacks.run('on_pretrain_routine_start')
 
     # Directories
@@ -508,86 +509,81 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
 
 
 def parse_opt(known=False):
-    """
-    weights: 权重文件
-    cfg: 模型配置文件 包括nc、depth_multiple、width_multiple、anchors、backbone、head等
-    data: 数据集配置文件 包括path、train、val、test、nc、names、download等
-    hyp: 初始超参文件
-    epochs: 训练轮次
-    batch-size: 训练批次大小
-    img-size: 输入网络的图片分辨率大小
-    resume: 断点续训, 从上次打断的训练结果处接着训练  默认False
-    nosave: 不保存模型  默认False(保存)      True: only test final epoch
-    notest: 是否只测试最后一轮 默认False  True: 只测试最后一轮   False: 每轮训练完都测试mAP
-    workers: dataloader中的最大work数（线程个数）
-    device: 训练的设备
-    single-cls: 数据集是否只有一个类别 默认False
-
-    rect: 训练集是否采用矩形训练  默认False
-    noautoanchor: 不自动调整anchor 默认False(自动调整anchor)
-    evolve: 是否进行超参进化 默认False
-    multi-scale: 是否使用多尺度训练 默认False
-    label-smoothing: 标签平滑增强 默认0.0不增强  要增强一般就设为0.1
-    adam: 是否使用adam优化器 默认False(使用SGD)
-    sync-bn: 是否使用跨卡同步bn操作,再DDP中使用  默认False
-    linear-lr: 是否使用linear lr  线性学习率  默认False 使用cosine lr
-    cache-image: 是否提前缓存图片到内存cache,以加速训练  默认False
-    image-weights: 是否使用图片采用策略(selection img to training by class weights) 默认False 不使用
-
-    bucket: 谷歌云盘bucket 一般用不到
-    project: 训练结果保存的根目录 默认是runs/train
-    name: 训练结果保存的目录 默认是exp  最终: runs/train/exp
-    exist-ok: 如果文件存在就ok不存在就新建或increment name  默认False(默认文件都是不存在的)
-    quad: dataloader取数据时, 是否使用collate_fn4代替collate_fn  默认False
-    save_period: Log model after every "save_period" epoch    默认-1 不需要log model 信息
-    artifact_alias: which version of dataset artifact to be stripped  默认lastest  貌似没用到这个参数？
-    local_rank: rank为进程编号  -1且gpu=1时不进行分布式  -1且多块gpu使用DataParallel模式
-
-    entity: wandb entity 默认None
-    upload_dataset: 是否上传dataset到wandb tabel(将数据集作为交互式 dsviz表 在浏览器中查看、查询、筛选和分析数据集) 默认False
-    bbox_interval: 设置界框图像记录间隔 Set bounding-box image logging interval for W&B 默认-1   opt.epochs // 10
-    """
     parser = argparse.ArgumentParser()
     # --------------------------------------------------- 常用参数 ---------------------------------------------
+    # 权重文件
     parser.add_argument('--weights', type=str, default=ROOT / 'yolov5s.pt', help='initial weights path')
+    # 模型配置文件 包括nc、depth_multiple、width_multiple、anchors、backbone、head等
     parser.add_argument('--cfg', type=str, default='', help='model.yaml path')
+    # 训练数据路径, 类别标签
     parser.add_argument('--data', type=str, default=ROOT / 'data/coco128.yaml', help='dataset.yaml path')
+    # 初始超参文件,如学习率,马赛克数据增强等
     parser.add_argument('--hyp', type=str, default=ROOT / 'data/hyps/hyp.scratch-low.yaml', help='hyperparameters path')
+    # 训练总轮数
     parser.add_argument('--epochs', type=int, default=100, help='total training epochs')
+    # batchsize
     parser.add_argument('--batch-size', type=int, default=16, help='total batch size for all GPUs, -1 for autobatch')
+    # 模型输入尺寸
     parser.add_argument('--imgsz', '--img', '--img-size', type=int, default=640, help='train, val image size (pixels)')
+    # 训练集是否采用矩形训练  默认False
     parser.add_argument('--rect', action='store_true', help='rectangular training')
+    # 断点续训, 从上次打断的训练结果处接着训练  默认False
     parser.add_argument('--resume', nargs='?', const=True, default=False, help='resume most recent training')
+    # 不保存模型  默认False,即保存所有epoch的模型, True: only test final epoch
     parser.add_argument('--nosave', action='store_true', help='only save final checkpoint')
+    # 新参数
     parser.add_argument('--noval', action='store_true', help='only validate final epoch')
+    # 不自动调整anchor 默认False, 即自动调整anchor
     parser.add_argument('--noautoanchor', action='store_true', help='disable AutoAnchor')
     parser.add_argument('--noplots', action='store_true', help='save no plot files')
+    # 是否进行超参进化 默认False
     parser.add_argument('--evolve', type=int, nargs='?', const=300, help='evolve hyperparameters for x generations')
+    # 谷歌云盘bucket 一般用不到
     parser.add_argument('--bucket', type=str, default='', help='gsutil bucket')
+    # 是否提前缓存图片到内存cache,以加速训练  默认False, 若加载到内存,应该会占用很多内存
     parser.add_argument('--cache', type=str, nargs='?', const='ram', help='image --cache ram/disk')
+    # 是否使用图片采样策略(selection img to training by class weights) 默认False 不使用
     parser.add_argument('--image-weights', action='store_true', help='use weighted image selection for training')
+    # # 设置代码执行的设备,gpu填数字,无gpu可以填cpu, 若什么都不写, 程序会gpu->cpu,依次检测可用设备进行推理
     parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
+    # 是否使用多尺度训练 默认False
     parser.add_argument('--multi-scale', action='store_true', help='vary img-size +/- 50%%')
+    # 数据集是否只有一个类别 默认False
     parser.add_argument('--single-cls', action='store_true', help='train multi-class data as single-class')
+    # 是否使用adam优化器 默认使用SGD
     parser.add_argument('--optimizer', type=str, choices=['SGD', 'Adam', 'AdamW'], default='SGD', help='optimizer')
+    # 是否使用跨卡同步bn操作,再DDP中使用  默认False
     parser.add_argument('--sync-bn', action='store_true', help='use SyncBatchNorm, only available in DDP mode')
+    # dataloader中的最大work数（线程个数）
     parser.add_argument('--workers', type=int, default=8, help='max dataloader workers (per RANK in DDP mode)')
+    # 训练结果保存的根目录 默认是runs/train
     parser.add_argument('--project', default=ROOT / 'runs/train', help='save to project/name')
+    # # 在上面runs/train中,每次运行子文件夹名称
     parser.add_argument('--name', default='exp', help='save to project/name')
+    # 如果文件存在就ok不存在就新建或increment name  默认False(默认文件都是不存在的)
     parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
+    # dataloader取数据时, 是否使用collate_fn4代替collate_fn  默认False
     parser.add_argument('--quad', action='store_true', help='quad dataloader')
+    # 使用余弦学习率,默认True
     parser.add_argument('--cos-lr', action='store_true', help='cosine LR scheduler')
+    # 标签平滑增强 默认0.0不增强  要增强一般就设为0.1
     parser.add_argument('--label-smoothing', type=float, default=0.0, help='Label smoothing epsilon')
     parser.add_argument('--patience', type=int, default=100, help='EarlyStopping patience (epochs without improvement)')
     parser.add_argument('--freeze', nargs='+', type=int, default=[0], help='Freeze layers: backbone=10, first3=0 1 2')
+    # 默认-1 不需要log model 信息
     parser.add_argument('--save-period', type=int, default=-1, help='Save checkpoint every x epochs (disabled if < 1)')
     parser.add_argument('--seed', type=int, default=0, help='Global training seed')
+    # rank为进程编号  -1且gpu=1时不进行分布式  -1且多块gpu使用DataParallel模式
     parser.add_argument('--local_rank', type=int, default=-1, help='Automatic DDP Multi-GPU argument, do not modify')
 
     # Logger arguments
+    # wandb entity 默认None
     parser.add_argument('--entity', default=None, help='Entity')
+    # 是否上传dataset到wandb tabel(将数据集作为交互式 dsviz表 在浏览器中查看、查询、筛选和分析数据集) 默认False
     parser.add_argument('--upload_dataset', nargs='?', const=True, default=False, help='Upload data, "val" option')
+    # 设置界框图像记录间隔 Set bounding-box image logging interval for W&B 默认-1   opt.epochs // 10
     parser.add_argument('--bbox_interval', type=int, default=-1, help='Set bounding-box image logging interval')
+    # which version of dataset artifact to be stripped  默认lastest  貌似没用到这个参数？
     parser.add_argument('--artifact_alias', type=str, default='latest', help='Version of dataset artifact to use')
 
     return parser.parse_known_args()[0] if known else parser.parse_args()

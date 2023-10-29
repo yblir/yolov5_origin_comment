@@ -62,7 +62,8 @@ def autopad(k, p=None, d=1):  # kernel, padding, dilation
 class Conv(nn.Module):
     # Standard convolution with args(ch_in, ch_out, kernel, stride, padding, groups, dilation, activation)
     default_act = nn.SiLU()  # default activation
-    def __init__(self, c1, c2, k=1, s=1, p=None, g=1,d=1, act=True):  # ch_in, ch_out, kernel, stride, padding, groups
+
+    def __init__(self, c1, c2, k=1, s=1, p=None, g=1, d=1, act=True):  # ch_in, ch_out, kernel, stride, padding, groups
         """
         Standard convolution  conv+BN+act
         :params c1: 输入的channel值
@@ -91,7 +92,7 @@ class Conv(nn.Module):
 
 
 class DWConv(Conv):
-	# 没有使用
+    # 没有使用
     # Depth-wise convolution
     def __init__(self, c1, c2, k=1, s=1, d=1, act=True):  # ch_in, ch_out, kernel, stride, dilation, activation
         super().__init__(c1, c2, k, s, g=math.gcd(c1, c2), d=d, act=act)
@@ -710,6 +711,7 @@ class DetectMultiBackend(nn.Module):
             return d['stride'], d['names']  # assign stride, names
         return None, None
 
+
 # 自动调整shape, yolov5没有使用
 class AutoShape(nn.Module):
     # YOLOv5 input-robust model wrapper for passing cv2/np/PIL/torch inputs. Includes preprocessing, inference and NMS
@@ -934,8 +936,11 @@ class Proto(nn.Module):
         self.upsample = nn.Upsample(scale_factor=2, mode='nearest')
         self.cv2 = Conv(c_, c_, k=3)
         self.cv3 = Conv(c_, c2)
+
     def forward(self, x):
         return self.cv3(self.cv2(self.upsample(self.cv1(x))))
+
+
 # 对检测出的结果二次分类，比如车牌检测，之后再对车牌上的字再进行检测
 class Classify(nn.Module):
     # Classification head, i.e. x(b,c1,20,20) to x(b,c2)
@@ -956,7 +961,7 @@ class Classify(nn.Module):
         self.linear = nn.Linear(c_, c2)  # to x(b,c2)
 
     def forward(self, x):
-	    # 先自适应平均池化操作， 然后拼接
+        # 先自适应平均池化操作， 然后拼接
         if isinstance(x, list):
             x = torch.cat(x, 1)
         return self.linear(self.drop(self.pool(self.conv(x)).flatten(1)))

@@ -100,7 +100,6 @@ def run(
     # 默认save_txt=False 所以这里一般都是新建一个 save_dir(runs/detect/expn)
     (save_dir / 'labels' if save_txt else save_dir).mkdir(parents=True, exist_ok=True)  # make dir
 
-    # Load model
     # 获取当前主机可用的设备
     device = select_device(device)
     model = DetectMultiBackend(weights, device=device, dnn=dnn, data=data, fp16=half)
@@ -182,10 +181,11 @@ def run(
             gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
             # imc: for save_crop 在save_crop中使用
             imc = im0.copy() if save_crop else im0  # for save_crop
+            # 这是一个与画检测框相关的类
             annotator = Annotator(im0, line_width=line_thickness, example=str(names))
             if len(det):
                 # Rescale boxes from img_size to im0 size
-                # 将预测信息（相对img_size 640）映射回原图 img0 size
+                # 将预测信息（相对img_size 640）映射回原图
                 det[:, :4] = scale_boxes(im.shape[2:], det[:, :4], im0.shape).round()
 
                 # Print results
@@ -265,60 +265,62 @@ def run(
 
 
 def parse_opt():
-    """
-    opt参数解析
-    weights: 模型的权重地址 默认 weights/best.pt
-    source: 测试数据文件(图片或视频)的保存路径 默认data/images
-    imgsz: 网络输入图片的大小 默认640
-    conf-thres: object置信度阈值 默认0.25
-    iou-thres: 做nms的iou阈值 默认0.45
-    max-det: 每张图片最大的目标个数 默认1000
-    device: 设置代码执行的设备 cuda device, i.e. 0 or 0,1,2,3 or cpu
-    view-img: 是否展示预测之后的图片或视频 默认False
-    save-txt: 是否将预测的框坐标以txt文件格式保存 默认True 会在runs/detect/expn/labels下生成每张图片预测的txt文件
-    save-conf: 是否保存预测每个目标的置信度到预测tx文件中 默认True
-    save-crop: 是否需要将预测到的目标从原图中扣出来 剪切好 并保存 会在runs/detect/expn下生成crops文件，将剪切的图片保存在里面  默认False
-    nosave: 是否不要保存预测后的图片  默认False 就是默认要保存预测后的图片
-    classes: 在nms中是否是只保留某些特定的类 默认是None 就是所有类只要满足条件都可以保留
-    agnostic-nms: 进行nms是否也除去不同类别之间的框 默认False
-    augment: 预测是否也要采用数据增强 TTA
-    update: 是否将optimizer从ckpt中删除  更新模型  默认False
-    project: 当前测试结果放在哪个主文件夹下 默认runs/detect
-    name: 当前测试结果放在run/detect下的文件名  默认是exp
-    exist-ok: 是否存在当前文件 默认False 一般是 no exist-ok 连用  所以一般都要重新创建文件夹
-    line-thickness: 画框的框框的线宽  默认是 3
-    hide-labels: 画出的框框是否需要隐藏label信息 默认False
-    hide-conf: 画出的框框是否需要隐藏conf信息 默认False
-    half: 是否使用半精度 Float16 推理 可以缩短推理时间 但是默认是False
-    """
     parser = argparse.ArgumentParser()
+    # 权重路径
     parser.add_argument('--weights', nargs='+', type=str, default=ROOT / 'yolov5s.pt', help='model path or triton URL')
+    # 测试数据文件(图片或视频)的保存路径
     parser.add_argument('--source', type=str, default=ROOT / 'data/images', help='file/dir/URL/glob/screen/0(webcam)')
+    # 在检测模块中没用到
     parser.add_argument('--data', type=str, default=ROOT / 'data/coco128.yaml', help='(optional) dataset.yaml path')
+    # 网络输入图片的大小
     parser.add_argument('--imgsz', '--img', '--img-size', nargs='+', type=int, default=[640], help='inference size h,w')
+    # 目标检测置信度阈值,值越大,可信度更高,同时获得检测目标/检测框越少
     parser.add_argument('--conf-thres', type=float, default=0.25, help='confidence threshold')
+    # 做nms的iou阈值,若两个检测框iou大于该值,其中conf-thres小的框被舍弃. 即该值越大,获得检测框越多
     parser.add_argument('--iou-thres', type=float, default=0.45, help='NMS IoU threshold')
+    # 每张图片最大的目标个数
     parser.add_argument('--max-det', type=int, default=1000, help='maximum detections per image')
+    # 设置代码执行的设备,gpu填数字,无gpu可以填cpu, 若什么都不写, 程序会gpu->cpu,依次检测可用设备进行推理
     parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
+    # 是否展示预测之后的图片或视频 默认False
     parser.add_argument('--view-img', action='store_true', help='show results')
+    # 是否将预测的框坐标以txt文件格式保存 默认False
     parser.add_argument('--save-txt', action='store_true', help='save results to *.txt')
+    # 是否将预测的框坐标以csv文件格式保存 默认False
     parser.add_argument('--save-csv', action='store_true', help='save results in CSV format')
+    # 是否保存预测每个目标的置信度到预测tx文件中 默认False
     parser.add_argument('--save-conf', action='store_true', help='save confidences in --save-txt labels')
+    # 是否需要将预测到的目标从原图中扣出来 剪切好, 默认False
     parser.add_argument('--save-crop', action='store_true', help='save cropped prediction boxes')
+    # 是否不要保存预测后的图片  默认False 就是默认要保存预测后的图片
     parser.add_argument('--nosave', action='store_true', help='do not save images/videos')
+    # 在nms中是否是只保留某些特定的类 默认是None 就是所有类只要满足条件都可以保留
     parser.add_argument('--classes', nargs='+', type=int, help='filter by class: --classes 0, or --classes 0 2 3')
+    # 进行nms是否也除去不同类别之间的框 默认False
     parser.add_argument('--agnostic-nms', action='store_true', help='class-agnostic NMS')
+    # 预测是否也要采用数据增强 TTA
     parser.add_argument('--augment', action='store_true', help='augmented inference')
+    # 可视化特征?
     parser.add_argument('--visualize', action='store_true', help='visualize features')
+    # 是否将optimizer从ckpt中删除  更新模型  默认False
     parser.add_argument('--update', action='store_true', help='update all models')
+    # 当前测试结果放在哪个主文件夹下 默认runs/detect
     parser.add_argument('--project', default=ROOT / 'runs/detect', help='save results to project/name')
+    # 在上面runs/detect中,每次运行子文件夹名称
     parser.add_argument('--name', default='exp', help='save results to project/name')
+    # 是否存在当前文件 默认False 一般是 no exist-ok 连用  所以一般都要重新创建文件夹
     parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
-    parser.add_argument('--line-thickness', default=3, type=int, help='bounding box thickness (pixels)')
+    # 画框的线宽
+    parser.add_argument('--line-thickness', default=2, type=int, help='bounding box thickness (pixels)')
+    # 画出的框框是否需要隐藏label信息 默认False, 即显示框的标签
     parser.add_argument('--hide-labels', default=False, action='store_true', help='hide labels')
+    # 画出的框框是否需要隐藏conf信息 默认False, 即显示框的置信度
     parser.add_argument('--hide-conf', default=False, action='store_true', help='hide confidences')
+    # 是否使用半精度 Float16 推理 可以缩短推理时间 但是默认是False
     parser.add_argument('--half', action='store_true', help='use FP16 half-precision inference')
+    # 对于到处的onnx文件, 用opencv自带的dnn模块进行推理
     parser.add_argument('--dnn', action='store_true', help='use OpenCV DNN for ONNX inference')
+    # 每个多少帧选一个视频帧图片
     parser.add_argument('--vid-stride', type=int, default=1, help='video frame-rate stride')
     opt = parser.parse_args()
     opt.imgsz *= 2 if len(opt.imgsz) == 1 else 1  # expand

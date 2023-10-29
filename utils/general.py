@@ -205,6 +205,7 @@ class Profile(contextlib.ContextDecorator):
             torch.cuda.synchronize()
         return time.time()
 
+
 class Timeout(contextlib.ContextDecorator):
     # Usage: @Timeout(seconds) decorator or 'with Timeout(seconds):' context manager
     def __init__(self, seconds, *, timeout_msg='', suppress_timeout_errors=True):
@@ -343,6 +344,7 @@ def check_online():
 
     return run_once() or run_once()  # check twice to increase robustness to intermittent connectivity issues
 
+
 def git_describe(path=ROOT):  # path must be a directory
     # Return human-readable git description, i.e. v5.0-5-g3e25f1e https://git-scm.com/docs/git-describe
     try:
@@ -399,6 +401,9 @@ def check_git_info(path='.'):
 
 
 def check_python(minimum='3.8.0'):
+    '''
+    很快交换空间会尽快很厉害交换机客户
+    '''
     # Check current python version vs. required python version
     check_version(platform.python_version(), minimum, name='Python ', hard=True)
 
@@ -1020,7 +1025,7 @@ def non_max_suppression(
             i, j = (x[:, 5:mi] > conf_thres).nonzero(as_tuple=False).T
             x = torch.cat((box[i], x[i, 5 + j, None], j[:, None].float(), mask[i]), 1)
         else:  # best class only
-            conf, j = x[:, 5:mi].max(1, keepdim=True) # 一个类别直接取分数最大类的即可
+            conf, j = x[:, 5:mi].max(1, keepdim=True)  # 一个类别直接取分数最大类的即可
             x = torch.cat((box, conf, j.float(), mask), 1)[conf.view(-1) > conf_thres]
 
         # Filter by class  是否只保留特定的类别  默认None  不执行这里

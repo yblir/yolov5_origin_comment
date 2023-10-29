@@ -121,7 +121,7 @@ def create_dataloader(path,
                       quad=False,
                       prefix='',
                       shuffle=False,
-					  seed=0):
+                      seed=0):
     """在train.py中被调用，用于生成Trainloader, dataset，testloader
     自定义dataloader函数: 调用LoadImagesAndLabels获取数据集(包括数据增强) + 调用分布式采样器DistributedSampler +
                         自定义InfiniteDataLoader 进行永久持续的采样数据
@@ -215,6 +215,7 @@ class _RepeatSampler:
         while True:
             yield from iter(self.sampler)
 
+
 # todo 新增加的模块
 class LoadScreenshots:
     # YOLOv5 screenshot dataloader, i.e. `python detect.py --source "screen 0 100 100 512 256"`
@@ -277,15 +278,15 @@ class LoadImages:
         files = []
         for p in sorted(path) if isinstance(path, (list, tuple)) else [path]:
             p = str(Path(p).resolve())
-        	# glob.glab: 返回所有匹配的文件路径列表   files: 提取图片所有路径
+            # glob.glab: 返回所有匹配的文件路径列表   files: 提取图片所有路径
             if '*' in p:
-            	# 如果p是采样正则化表达式提取图片/视频, 可以使用glob获取文件路径
+                # 如果p是采样正则化表达式提取图片/视频, 可以使用glob获取文件路径
                 files.extend(sorted(glob.glob(p, recursive=True)))  # glob
             elif os.path.isdir(p):
-            	# 如果p是一个文件夹，使用glob获取全部文件路径
+                # 如果p是一个文件夹，使用glob获取全部文件路径
                 files.extend(sorted(glob.glob(os.path.join(p, '*.*'))))  # dir
             elif os.path.isfile(p):
-            	# 如果p是文件则直接获取
+                # 如果p是文件则直接获取
                 files.append(p)  # files
             else:
                 raise FileNotFoundError(f'{p} does not exist')
@@ -393,6 +394,8 @@ cap.grap():从设备或视频获取下一帧,获取成功返回true,是否为fal
 cap.retrieve(frame): 在grap后使用,对获取到的帧进行解码, 也返回true或false
 cap.read(frame): 结合grap和retrieve的功能,抓取下一帧并解码
 """
+
+
 class LoadStreams:
     # YOLOv5 streamloader, i.e. `python detect.py --source 'rtsp://example.com/media.mp4'  # RTSP, RTMP, HTTP streams`
     """
@@ -411,7 +414,7 @@ class LoadStreams:
         n = len(sources)
         self.sources = [clean_str(x) for x in sources]  # clean source names for later
         self.imgs, self.fps, self.frames, self.threads = [None] * n, [0] * n, [0] * n, [None] * n
-		# 遍历每一个视频
+        # 遍历每一个视频
         for i, s in enumerate(sources):  # index, source
             # Start thread to read frames from video stream
             # 打印当前视频index/总视频数/视频流地址
@@ -486,7 +489,7 @@ class LoadStreams:
         else:
             im = np.stack([letterbox(x, self.img_size, stride=self.stride, auto=self.auto)[0] for x in im0])  # resize
 
-        # Convert
+            # Convert
             im = im[..., ::-1].transpose((0, 3, 1, 2))  # BGR to RGB, BHWC to BCHW
             im = np.ascontiguousarray(im)  # contiguous 转换成内存连续的存储方式
 
@@ -1208,7 +1211,7 @@ def extract_boxes(path=DATASETS_DIR / 'coco128'):  # from utils.dataloaders impo
             # labels 根据这张图片的路径找到这张图片的label路径
             lb_file = Path(img2label_paths([str(im_file)])[0])
             if Path(lb_file).exists():
-                with open(lb_file) as f:	# 读取label的各行: 对应各个gt坐标
+                with open(lb_file) as f:  # 读取label的各行: 对应各个gt坐标
                     lb = np.array([x.split() for x in f.read().strip().splitlines()], dtype=np.float32)  # labels
 
                 for j, x in enumerate(lb):  # 遍历每一个gt
@@ -1431,10 +1434,10 @@ class HUBDatasetStats():
             x = np.array([
                 np.bincount(label[:, 0].astype(int), minlength=self.data['nc'])
                 for label in tqdm(dataset.labels, total=dataset.n, desc='Statistics')])  # shape(128x80)
-        # 分别统计train、val、test三个数据集的数据信息
-        # 包括: 'image_stats': 字典dict  图片数量total  没有标签的文件个数unlabelled  数据集每个类别的gt个数[80]
-        # 'instance_stats': 字典dict  数据集中所有图片的所有gt个数total   数据集中每个类别的gt个数[80]
-        # 'labels': 字典dict  key=数据集中每张图片的文件名  value=每张图片对应的label信息 [n, cls+xywh]
+            # 分别统计train、val、test三个数据集的数据信息
+            # 包括: 'image_stats': 字典dict  图片数量total  没有标签的文件个数unlabelled  数据集每个类别的gt个数[80]
+            # 'instance_stats': 字典dict  数据集中所有图片的所有gt个数total   数据集中每个类别的gt个数[80]
+            # 'labels': 字典dict  key=数据集中每张图片的文件名  value=每张图片对应的label信息 [n, cls+xywh]
             self.stats[split] = {
                 'instance_stats': {
                     'total': int(x.sum()),
