@@ -394,7 +394,7 @@ def model_info(model, verbose=False, imgsz=640):
         # 调用profile计算输入图片img=(1, 3, 32, 32)时当前模型的浮点计算量GFLOPs   stride GFLOPs
         # profile求出来的浮点计算量是FLOPs  /1E9 => GFLOPs
         # *2是因为profile函数默认求的就是模型为float64时的浮点计算量 而我们传入的模型一般都是float32 所以乘以2(可以点进profile看他定义的add_hooks函数)
-        flops = thop.profile(deepcopy(model), inputs=(im, ), verbose=False)[0] / 1E9 * 2  # stride GFLOPs
+        flops = thop.profile(deepcopy(model), inputs=(im,), verbose=False)[0] / 1E9 * 2  # stride GFLOPs
         # expand  img_size -> [img_size, img_size]=[640, 640]
         imgsz = imgsz if isinstance(imgsz, list) else [imgsz, imgsz]  # expand if int/float
         # 根据img=(1, 3, 32, 32)的浮点计算量flops推算出640x640的图片的浮点计算量GFLOPs
@@ -421,17 +421,17 @@ def scale_img(img, ratio=1.0, same_shape=False, gs=32):  # img(16,3,256,416)
         return img
         # h, w: 原图的高和宽
     h, w = img.shape[2:]
-        # s: 放缩后图片的新尺寸  new size
+    # s: 放缩后图片的新尺寸  new size
     s = (int(h * ratio), int(w * ratio))  # new size
-        # 直接使用torch自带的F.interpolate(上采样下采样函数)插值函数进行resize
-        # F.interpolate: 可以给定size或者scale_factor来进行上下采样
-        #                mode='bilinear': 双线性插值  nearest:最近邻
-        #                align_corner: 是否对齐 input 和 output 的角点像素(corner pixels)
+    # 直接使用torch自带的F.interpolate(上采样下采样函数)插值函数进行resize
+    # F.interpolate: 可以给定size或者scale_factor来进行上下采样
+    #                mode='bilinear': 双线性插值  nearest:最近邻
+    #                align_corner: 是否对齐 input 和 output 的角点像素(corner pixels)
     img = F.interpolate(img, size=s, mode='bilinear', align_corners=False)  # resize
     if not same_shape:  # pad/crop img
-            # 缩放之后要是尺寸和要求的大小(必须是gs=32的倍数)不同 再对其不相交的部分进行pad
-            # 而pad的值就是imagenet的mean
-            # Math.ceil(): 向上取整  这里除以gs向上取整再乘以gs是为了保证h、w都是gs的倍数
+        # 缩放之后要是尺寸和要求的大小(必须是gs=32的倍数)不同 再对其不相交的部分进行pad
+        # 而pad的值就是imagenet的mean
+        # Math.ceil(): 向上取整  这里除以gs向上取整再乘以gs是为了保证h、w都是gs的倍数
         h, w = (math.ceil(x * ratio / gs) * gs for x in (h, w))
         # pad img shape to gs的倍数 填充值为 imagenet mean
     return F.pad(img, [0, w - s[1], 0, h - s[0]], value=0.447)  # value = imagenet mean
@@ -580,9 +580,9 @@ class ModelEMA:
         msd = de_parallel(model).state_dict()  # model state_dict
         # 遍历模型配置字典 如: k=linear.bias  v=[0.32, 0.25]  ema中的数据发生改变 用于测试
         for k, v in self.ema.state_dict().items():
-        # 这里得到的v: 预测值
+            # 这里得到的v: 预测值
             if v.dtype.is_floating_point:  # true for FP16 and FP32
-                v *= d   # 公式左边  decay * shadow_variable
+                v *= d  # 公式左边  decay * shadow_variable
                 # .detach() 使对应的Variables与网络隔开而不参与梯度更新
                 v += (1 - d) * msd[k].detach()  # 公式右边  (1−decay) * variable
 

@@ -75,32 +75,33 @@ WORLD_SIZE = int(os.getenv('WORLD_SIZE', 1))  # 总共有几个 Worker
 GIT_INFO = check_git_info()
 warnings.filterwarnings('ignore')
 
+
 def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictionary
     save_dir, epochs, batch_size, weights, single_cls, evolve, data, cfg, resume, noval, nosave, workers, freeze = \
         Path(opt.save_dir), opt.epochs, opt.batch_size, opt.weights, opt.single_cls, opt.evolve, opt.data, opt.cfg, \
-            opt.resume, opt.noval, opt.nosave, opt.workers, opt.freeze
+        opt.resume, opt.noval, opt.nosave, opt.workers, opt.freeze
     callbacks.run('on_pretrain_routine_start')
 
     # Directories
-    w = save_dir / 'weights'  # weights dir
+    w = save_dir / 'weights'  # weights dir 创建保存权重文件夹, 只保留最后和最后一个
     (w.parent if evolve else w).mkdir(parents=True, exist_ok=True)  # make dir
     last, best = w / 'last.pt', w / 'best.pt'
 
     # Hyperparameters
-    if isinstance(hyp, str):
+    if isinstance(hyp, str):  # 这个代码段,配置学习率,数据增强,优化器等超参数
         with open(hyp, errors='ignore') as f:
             hyp = yaml.safe_load(f)  # load hyps dict
     LOGGER.info(colorstr('hyperparameters: ') + ', '.join(f'{k}={v}' for k, v in hyp.items()))
     opt.hyp = hyp.copy()  # for saving hyps to checkpoints
 
     # Save run settings
-    if not evolve:
+    if not evolve:  # 如果不使用超参数进化,则把正在使用的超参数和训练配置保存到当前训练文件中
         yaml_save(save_dir / 'hyp.yaml', hyp)
         yaml_save(save_dir / 'opt.yaml', vars(opt))
 
     # Loggers
     data_dict = None
-    if RANK in {-1, 0}:
+    if RANK in {-1, 0}:  # 这个if代码段,在配置logger日志
         loggers = Loggers(save_dir, weights, opt, hyp, LOGGER)  # loggers instance
 
         # Register actions
@@ -116,21 +117,22 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     # 是否需要画图: 所有的labels信息、前三次迭代的barch、训练结果等
     plots = not evolve and not opt.noplots  # create plots
     cuda = device.type != 'cpu'
-    init_seeds(opt.seed + 1 + RANK, deterministic=True)
-    with torch_distributed_zero_first(LOCAL_RANK):
+    init_seeds(opt.seed + 1 + RANK, deterministic=True)  # 设置一些列随机种子,有必要吗?
+    with torch_distributed_zero_first(LOCAL_RANK):  # 进行不同线程间的数据同步
         data_dict = data_dict or check_dataset(data)  # check if None
     train_path, val_path = data_dict['train'], data_dict['val']
-    # nc: number of classes  数据集有多少种类别
-    nc = 1 if single_cls else int(data_dict['nc'])  # number of classes
-    names = {0: 'item'} if single_cls and len(data_dict['names']) != 1 else data_dict['names']  # class names
+    # nc 数据集类别数量 coco 80
+    nc = 1 if single_cls else int(data_dict['nc'])
+    # 类别字典{0:"xxx",...}
+    names = {0: 'item'} if single_cls and len(data_dict['names']) != 1 else data_dict['names']
     is_coco = isinstance(val_path, str) and val_path.endswith('coco/val2017.txt')  # COCO dataset
 
     # Model
     check_suffix(weights, '.pt')  # check weights
     pretrained = weights.endswith('.pt')
-    if pretrained:
+    if pretrained:  # 是否使用预训练模型
         with torch_distributed_zero_first(LOCAL_RANK):
-            # 这里下载是去google云盘下载, 一般会下载失败,所以建议自行去github中下载再放到weights下
+            # 如果预训练模型存在,直接跳过, 不然这去google云盘下载, 一般会下载失败,所以建议自行去github中下载再放到weights下
             weights = attempt_download(weights)  # download if not found locally
         # 加载模型及参数
         ckpt = torch.load(weights, map_location='cpu')  # load checkpoint to CPU to avoid CUDA memory leak
@@ -153,7 +155,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
         model = Model(cfg, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)  # create
     amp = check_amp(model)  # check AMP
 
-    # Freeze
+    # Freeze 选择冻结多少层不训练,默认不冻结, 所有层都训练
     freeze = [f'model.{x}.' for x in (freeze if len(freeze) > 1 else range(freeze[0]))]  # layers to freeze
     for k, v in model.named_parameters():
         v.requires_grad = True  # train all layers
@@ -161,7 +163,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
             LOGGER.info(f'freezing {k}')
             v.requires_grad = False
 
-    # Image size
+    # Image size 检查模型输入尺寸
     gs = max(int(model.stride.max()), 32)  # grid size (max stride)
     imgsz = check_img_size(opt.imgsz, gs, floor=gs * 2)  # verify imgsz is gs-multiple
 
@@ -171,13 +173,13 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
         loggers.on_params_update({"batch_size": batch_size})
 
     # Optimizer
-    nbs = 64  # nominal batch size
+    nbs = 64  # 累积nbs张图片的训练再进行梯度回传, 起到增加batchsize的作用
     accumulate = max(round(nbs / batch_size), 1)  # accumulate loss before optimizing
     hyp['weight_decay'] *= batch_size * accumulate / nbs  # scale weight_decay
     optimizer = smart_optimizer(model, opt.optimizer, hyp['lr0'], hyp['momentum'], hyp['weight_decay'])
 
     # Scheduler
-    if opt.cos_lr:
+    if opt.cos_lr:  # 默认False, 这个模块是学习率的调整方式
         # 使用one cycle 学习率  https://arxiv.org/pdf/1803.09820.pdf
         lf = one_cycle(1, hyp['lrf'], epochs)  # cosine 1->hyp['lrf']
     else:
@@ -186,30 +188,30 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     # 实例化 scheduler
     scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lf)  # plot_lr_scheduler(optimizer, scheduler, epochs)
 
-    # EMA
+    # EMA 利用滑动平均的参数来提高模型在测试数据上的健壮性/鲁棒性,训练中有使用
     ema = ModelEMA(model) if RANK in {-1, 0} else None
 
-    # Resume
+    # Resume 如果断点续训, 这是epoch从中断储开始
     best_fitness, start_epoch = 0.0, 0
     if pretrained:
         if resume:
             best_fitness, start_epoch, epochs = smart_resume(ckpt, optimizer, ema, weights, epochs, resume)
         del ckpt, csd
 
-    # DP mode
+    # DP mode 分布式相关训练配置
     if cuda and RANK == -1 and torch.cuda.device_count() > 1:
         LOGGER.warning(
-            'WARNING ⚠️ DP not recommended, use torch.distributed.run for best DDP Multi-GPU results.\n'
-            'See Multi-GPU Tutorial at https://docs.ultralytics.com/yolov5/tutorials/multi_gpu_training to get started.'
+                'WARNING ⚠️ DP not recommended, use torch.distributed.run for best DDP Multi-GPU results.\n'
+                'See Multi-GPU Tutorial at https://docs.ultralytics.com/yolov5/tutorials/multi_gpu_training to get started.'
         )
         model = torch.nn.DataParallel(model)
 
-    # SyncBatchNorm
+    # SyncBatchNorm 跨卡同步bn操作,在DDP中使用,  默认False,没有使用
     if opt.sync_bn and cuda and RANK != -1:
         model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model).to(device)
         LOGGER.info('Using SyncBatchNorm()')
 
-    # Trainloader
+    # Trainloader 创建训练数据集
     train_loader, dataset = create_dataloader(train_path,
                                               imgsz,
                                               batch_size // WORLD_SIZE,
@@ -230,7 +232,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     mlc = int(labels[:, 0].max())  # max label class
     assert mlc < nc, f'Label class {mlc} exceeds nc={nc} in {data}. Possible class labels are 0-{nc - 1}'
 
-    # Process 0
+    # Process 0, -1且单卡,不进行分布式, -1且多卡,进行分布式. 0指分布式系统中0号卡, 验证工作只在0号卡上进行
     if RANK in {-1, 0}:
         val_loader = create_dataloader(val_path,
                                        imgsz,
@@ -448,15 +450,15 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
             # model保存的是EMA的模型
             if (not nosave) or (final_epoch and not evolve):  # if save
                 ckpt = {
-                    'epoch': epoch,
+                    'epoch'       : epoch,
                     'best_fitness': best_fitness,
-                    'model': deepcopy(de_parallel(model)).half(),
-                    'ema': deepcopy(ema.ema).half(),
-                    'updates': ema.updates,
-                    'optimizer': optimizer.state_dict(),
-                    'opt': vars(opt),
-                    'git': GIT_INFO,  # {remote, branch, commit} if a git repo
-                    'date': datetime.now().isoformat()}
+                    'model'       : deepcopy(de_parallel(model)).half(),
+                    'ema'         : deepcopy(ema.ema).half(),
+                    'updates'     : ema.updates,
+                    'optimizer'   : optimizer.state_dict(),
+                    'opt'         : vars(opt),
+                    'git'         : GIT_INFO,  # {remote, branch, commit} if a git repo
+                    'date'        : datetime.now().isoformat()}
 
                 # Save last, best and delete
                 torch.save(ckpt, last)
@@ -486,19 +488,19 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                 if f is best:
                     LOGGER.info(f'\nValidating {f}...')
                     results, _, _ = validate.run(
-                        data_dict,
-                        batch_size=batch_size // WORLD_SIZE * 2,
-                        imgsz=imgsz,
-                        model=attempt_load(f, device).half(),
-                        iou_thres=0.65 if is_coco else 0.60,  # best pycocotools at iou 0.65
-                        single_cls=single_cls,
-                        dataloader=val_loader,
-                        save_dir=save_dir,
-                        save_json=is_coco,
-                        verbose=True,
-                        plots=plots,
-                        callbacks=callbacks,
-                        compute_loss=compute_loss)  # val best model with plots
+                            data_dict,
+                            batch_size=batch_size // WORLD_SIZE * 2,
+                            imgsz=imgsz,
+                            model=attempt_load(f, device).half(),
+                            iou_thres=0.65 if is_coco else 0.60,  # best pycocotools at iou 0.65
+                            single_cls=single_cls,
+                            dataloader=val_loader,
+                            save_dir=save_dir,
+                            save_json=is_coco,
+                            verbose=True,
+                            plots=plots,
+                            callbacks=callbacks,
+                            compute_loss=compute_loss)  # val best model with plots
                     if is_coco:
                         callbacks.run('on_fit_epoch_end', list(mloss) + list(results) + lr, epoch, best_fitness, fi)
 
@@ -536,7 +538,7 @@ def parse_opt(known=False):
     # 不自动调整anchor 默认False, 即自动调整anchor
     parser.add_argument('--noautoanchor', action='store_true', help='disable AutoAnchor')
     parser.add_argument('--noplots', action='store_true', help='save no plot files')
-    # 是否进行超参进化 默认False
+    # 是否进行超参进化 默认None
     parser.add_argument('--evolve', type=int, nargs='?', const=300, help='evolve hyperparameters for x generations')
     # 谷歌云盘bucket 一般用不到
     parser.add_argument('--bucket', type=str, default='', help='gsutil bucket')
@@ -552,13 +554,13 @@ def parse_opt(known=False):
     parser.add_argument('--single-cls', action='store_true', help='train multi-class data as single-class')
     # 是否使用adam优化器 默认使用SGD
     parser.add_argument('--optimizer', type=str, choices=['SGD', 'Adam', 'AdamW'], default='SGD', help='optimizer')
-    # 是否使用跨卡同步bn操作,再DDP中使用  默认False
+    # 是否使用跨卡同步bn操作,在DDP中使用  默认False
     parser.add_argument('--sync-bn', action='store_true', help='use SyncBatchNorm, only available in DDP mode')
     # dataloader中的最大work数（线程个数）
-    parser.add_argument('--workers', type=int, default=8, help='max dataloader workers (per RANK in DDP mode)')
+    parser.add_argument('--workers', type=int, default=2, help='max dataloader workers (per RANK in DDP mode)')
     # 训练结果保存的根目录 默认是runs/train
     parser.add_argument('--project', default=ROOT / 'runs/train', help='save to project/name')
-    # # 在上面runs/train中,每次运行子文件夹名称
+    # # 在上面runs/train中,每次启动训练,保存当次训练文件的子文件夹名称
     parser.add_argument('--name', default='exp', help='save to project/name')
     # 如果文件存在就ok不存在就新建或increment name  默认False(默认文件都是不存在的)
     parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
@@ -599,7 +601,7 @@ def main(opt, callbacks=Callbacks()):
         check_requirements(ROOT / 'requirements.txt')
 
     # Resume
-    if opt.resume and not check_comet_resume(opt) and not opt.evolve:
+    if opt.resume and not check_comet_resume(opt) and not opt.evolve:  # 断点续训
         last = Path(check_file(opt.resume) if isinstance(opt.resume, str) else get_latest_run())
         opt_yaml = last.parent.parent / 'opt.yaml'  # train options yaml
         opt_data = opt.data  # original dataset
@@ -612,23 +614,23 @@ def main(opt, callbacks=Callbacks()):
         opt.cfg, opt.weights, opt.resume = '', str(last), True  # reinstate
         if is_url(opt_data):
             opt.data = check_file(opt_data)  # avoid HUB resume auth timeout
-    else:
+    else:  # 不使用断点续训
         opt.data, opt.cfg, opt.hyp, opt.weights, opt.project = \
             check_file(opt.data), check_yaml(opt.cfg), check_yaml(opt.hyp), str(opt.weights), str(opt.project)  # checks
         assert len(opt.cfg) or len(opt.weights), 'either --cfg or --weights must be specified'
-        if opt.evolve:
+        if opt.evolve:  # 是否进行超参进化 默认None
             if opt.project == str(ROOT / 'runs/train'):  # if default project name, rename to runs/evolve
                 opt.project = str(ROOT / 'runs/evolve')
             opt.exist_ok, opt.resume = opt.resume, False  # pass resume to exist_ok and disable resume
-        if opt.name == 'cfg':
+        if opt.name == 'cfg':  # 这个判断是来搞笑的吗!
             opt.name = Path(opt.cfg).stem  # use model.yaml as name
-        # 根据opt.project生成目录  如: runs/train/exp18
+        # 根据opt.project训练文件保存目录  如: runs/train/exp18
         opt.save_dir = str(increment_path(Path(opt.project) / opt.name, exist_ok=opt.exist_ok))
 
     # DDP mode
-    # 选择设备  cpu/cuda:0
+    # 选择设备  cpu/cuda:0, 如果什么都不写,自动搜索设备并设置
     device = select_device(opt.device, batch_size=opt.batch_size)
-    if LOCAL_RANK != -1:
+    if LOCAL_RANK != -1:  # -1且gpu=1时不进行分布式  -1且多块gpu使用DataParallel模式
         msg = 'is not compatible with YOLOv5 Multi-GPU DDP training'
         assert not opt.image_weights, f'--image-weights {msg}'
         assert not opt.evolve, f'--evolve {msg}'
@@ -653,35 +655,35 @@ def main(opt, callbacks=Callbacks()):
     else:
         # Hyperparameter evolution metadata (mutation scale 0-1, lower_limit, upper_limit)
         meta = {
-            'lr0': (1, 1e-5, 1e-1),  # initial learning rate (SGD=1E-2, Adam=1E-3)
-            'lrf': (1, 0.01, 1.0),  # final OneCycleLR learning rate (lr0 * lrf)
-            'momentum': (0.3, 0.6, 0.98),  # SGD momentum/Adam beta1
-            'weight_decay': (1, 0.0, 0.001),  # optimizer weight decay
-            'warmup_epochs': (1, 0.0, 5.0),  # warmup epochs (fractions ok)
+            'lr0'            : (1, 1e-5, 1e-1),  # initial learning rate (SGD=1E-2, Adam=1E-3)
+            'lrf'            : (1, 0.01, 1.0),  # final OneCycleLR learning rate (lr0 * lrf)
+            'momentum'       : (0.3, 0.6, 0.98),  # SGD momentum/Adam beta1
+            'weight_decay'   : (1, 0.0, 0.001),  # optimizer weight decay
+            'warmup_epochs'  : (1, 0.0, 5.0),  # warmup epochs (fractions ok)
             'warmup_momentum': (1, 0.0, 0.95),  # warmup initial momentum
-            'warmup_bias_lr': (1, 0.0, 0.2),  # warmup initial bias lr
-            'box': (1, 0.02, 0.2),  # box loss gain
-            'cls': (1, 0.2, 4.0),  # cls loss gain
-            'cls_pw': (1, 0.5, 2.0),  # cls BCELoss positive_weight
-            'obj': (1, 0.2, 4.0),  # obj loss gain (scale with pixels)
-            'obj_pw': (1, 0.5, 2.0),  # obj BCELoss positive_weight
-            'iou_t': (0, 0.1, 0.7),  # IoU training threshold
-            'anchor_t': (1, 2.0, 8.0),  # anchor-multiple threshold
-            'anchors': (2, 2.0, 10.0),  # anchors per output grid (0 to ignore)
-            'fl_gamma': (0, 0.0, 2.0),  # focal loss gamma (efficientDet default gamma=1.5)
-            'hsv_h': (1, 0.0, 0.1),  # image HSV-Hue augmentation (fraction)
-            'hsv_s': (1, 0.0, 0.9),  # image HSV-Saturation augmentation (fraction)
-            'hsv_v': (1, 0.0, 0.9),  # image HSV-Value augmentation (fraction)
-            'degrees': (1, 0.0, 45.0),  # image rotation (+/- deg)
-            'translate': (1, 0.0, 0.9),  # image translation (+/- fraction)
-            'scale': (1, 0.0, 0.9),  # image scale (+/- gain)
-            'shear': (1, 0.0, 10.0),  # image shear (+/- deg)
-            'perspective': (0, 0.0, 0.001),  # image perspective (+/- fraction), range 0-0.001
-            'flipud': (1, 0.0, 1.0),  # image flip up-down (probability)
-            'fliplr': (0, 0.0, 1.0),  # image flip left-right (probability)
-            'mosaic': (1, 0.0, 1.0),  # image mixup (probability)
-            'mixup': (1, 0.0, 1.0),  # image mixup (probability)
-            'copy_paste': (1, 0.0, 1.0)}  # segment copy-paste (probability)
+            'warmup_bias_lr' : (1, 0.0, 0.2),  # warmup initial bias lr
+            'box'            : (1, 0.02, 0.2),  # box loss gain
+            'cls'            : (1, 0.2, 4.0),  # cls loss gain
+            'cls_pw'         : (1, 0.5, 2.0),  # cls BCELoss positive_weight
+            'obj'            : (1, 0.2, 4.0),  # obj loss gain (scale with pixels)
+            'obj_pw'         : (1, 0.5, 2.0),  # obj BCELoss positive_weight
+            'iou_t'          : (0, 0.1, 0.7),  # IoU training threshold
+            'anchor_t'       : (1, 2.0, 8.0),  # anchor-multiple threshold
+            'anchors'        : (2, 2.0, 10.0),  # anchors per output grid (0 to ignore)
+            'fl_gamma'       : (0, 0.0, 2.0),  # focal loss gamma (efficientDet default gamma=1.5)
+            'hsv_h'          : (1, 0.0, 0.1),  # image HSV-Hue augmentation (fraction)
+            'hsv_s'          : (1, 0.0, 0.9),  # image HSV-Saturation augmentation (fraction)
+            'hsv_v'          : (1, 0.0, 0.9),  # image HSV-Value augmentation (fraction)
+            'degrees'        : (1, 0.0, 45.0),  # image rotation (+/- deg)
+            'translate'      : (1, 0.0, 0.9),  # image translation (+/- fraction)
+            'scale'          : (1, 0.0, 0.9),  # image scale (+/- gain)
+            'shear'          : (1, 0.0, 10.0),  # image shear (+/- deg)
+            'perspective'    : (0, 0.0, 0.001),  # image perspective (+/- fraction), range 0-0.001
+            'flipud'         : (1, 0.0, 1.0),  # image flip up-down (probability)
+            'fliplr'         : (0, 0.0, 1.0),  # image flip left-right (probability)
+            'mosaic'         : (1, 0.0, 1.0),  # image mixup (probability)
+            'mixup'          : (1, 0.0, 1.0),  # image mixup (probability)
+            'copy_paste'     : (1, 0.0, 1.0)}  # segment copy-paste (probability)
 
         with open(opt.hyp, errors='ignore') as f:
             hyp = yaml.safe_load(f)  # load hyps dict
