@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # YOLOv5 🚀 by Ultralytics, GPL-3.0 license
 """
 Train a YOLOv5 model on a custom dataset.
@@ -178,8 +179,8 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     hyp['weight_decay'] *= batch_size * accumulate / nbs  # scale weight_decay
     optimizer = smart_optimizer(model, opt.optimizer, hyp['lr0'], hyp['momentum'], hyp['weight_decay'])
 
-    # Scheduler
-    if opt.cos_lr:  # 默认False, 这个模块是学习率的调整方式
+    # Scheduler,这个模块是学习率的调整方式
+    if opt.cos_lr:  # 默认False,
         # 使用one cycle 学习率  https://arxiv.org/pdf/1803.09820.pdf
         lf = one_cycle(1, hyp['lrf'], epochs)  # cosine 1->hyp['lrf']
     else:
@@ -262,7 +263,9 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     if cuda and RANK != -1:
         model = smart_DDP(model)
 
-    # Model attributes
+    # Model attributes, 这些参数都是干嘛用的?
+    # nl指模型输出特征层数量,nl=3, 分别对应13x13,26x26,52x52,通过len(anchors)获得,即每个特征图对
+    # 应一个anchor(注意每个anchor都是列表,里面有3个尺寸接近不同大小的框, 所有特征图加起来共有9个框)
     nl = de_parallel(model).model[-1].nl  # number of detection layers (to scale hyps)
     hyp['box'] *= 3 / nl  # scale to layers
     hyp['cls'] *= nc / 80 * 3 / nl  # scale to classes and layers
@@ -274,6 +277,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     model.names = names
 
     # Start training
+    # 超参设定
     t0 = time.time()
     nb = len(train_loader)  # number of batches
     nw = max(round(hyp['warmup_epochs'] * nb), 100)  # number of warmup iterations, max(3 epochs, 100 iterations)
@@ -293,7 +297,8 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                 f'Using {train_loader.num_workers * WORLD_SIZE} dataloader workers\n'
                 f"Logging results to {colorstr('bold', save_dir)}\n"
                 f'Starting training for {epochs} epochs...')
-    for epoch in range(start_epoch, epochs):  # epoch ------------------------------------------------------------------
+    # 开始训练 ==========================================================================================================
+    for epoch in range(start_epoch, epochs):
         callbacks.run('on_train_epoch_start')
         model.train()
 
@@ -362,10 +367,10 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                 # 计算损失，包括分类损失，置信度损失和框的回归损失
                 # loss为总损失值  loss_items为一个元组，包含分类损失、置信度损失、框的回归损失和总损失
                 loss, loss_items = compute_loss(pred, targets.to(device))  # loss scaled by batch_size
-                if RANK != -1:
+                if RANK != -1:  # 默认False
                     # 采用DDP训练 平均不同gpu之间的梯度
                     loss *= WORLD_SIZE  # gradient averaged between devices in DDP mode
-                if opt.quad:
+                if opt.quad:  # 默认False
                     # 如果采用collate_fn4取出mosaic4数据loss也要翻4倍
                     loss *= 4.
 
@@ -406,8 +411,8 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
         lr = [x['lr'] for x in optimizer.param_groups]  # for loggers
         scheduler.step()
 
+        # 计算验证集mAP,并保存当前模型为last.pth. 同时,若map好于以前的map,会覆盖best.pth,否则不覆盖.
         if RANK in {-1, 0}:
-            # mAP
             callbacks.run('on_train_epoch_end', epoch=epoch)
             ema.update_attr(model, include=['yaml', 'nc', 'hyp', 'names', 'stride', 'class_weights'])
             # 判断当前epoch是否是最后一轮
@@ -462,14 +467,14 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
 
                 # Save last, best and delete
                 torch.save(ckpt, last)
-                if best_fitness == fi:
+                if best_fitness == fi:  # 若map好于以前的步骤,会覆盖best.pth
                     torch.save(ckpt, best)
-                if opt.save_period > 0 and epoch % opt.save_period == 0:
+                if opt.save_period > 0 and epoch % opt.save_period == 0:  # 每隔save_period个epoch保存一次模型,默认为False
                     torch.save(ckpt, w / f'epoch{epoch}.pt')
-                del ckpt
+                del ckpt  # 优化细节拉满
                 callbacks.run('on_model_save', last, epoch, final_epoch, best_fitness, fi)
 
-        # EarlyStopping
+        # EarlyStopping, 早停手段, 只在分布式训练中有用到 ?
         if RANK != -1:  # if DDP training
             broadcast_list = [stop if RANK == 0 else None]
             dist.broadcast_object_list(broadcast_list, 0)  # broadcast 'stop' to all ranks
@@ -477,8 +482,8 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                 stop = broadcast_list[0]
         if stop:
             break  # must break all DDP ranks
-
         # end epoch ----------------------------------------------------------------------------------------------------
+
     # end training -----------------------------------------------------------------------------------------------------
     if RANK in {-1, 0}:
         LOGGER.info(f'\n{epoch - start_epoch + 1} epochs completed in {(time.time() - t0) / 3600:.3f} hours.')
@@ -544,7 +549,7 @@ def parse_opt(known=False):
     parser.add_argument('--bucket', type=str, default='', help='gsutil bucket')
     # 是否提前缓存图片到内存cache,以加速训练  默认False, 若加载到内存,应该会占用很多内存
     parser.add_argument('--cache', type=str, nargs='?', const='ram', help='image --cache ram/disk')
-    # 是否使用图片采样策略(selection img to training by class weights) 默认False 不使用
+    # 按数据集各类别权重采样,可以平衡类别不均衡, 默认False 不使用
     parser.add_argument('--image-weights', action='store_true', help='use weighted image selection for training')
     # # 设置代码执行的设备,gpu填数字,无gpu可以填cpu, 若什么都不写, 程序会gpu->cpu,依次检测可用设备进行推理
     parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
@@ -557,7 +562,7 @@ def parse_opt(known=False):
     # 是否使用跨卡同步bn操作,在DDP中使用  默认False
     parser.add_argument('--sync-bn', action='store_true', help='use SyncBatchNorm, only available in DDP mode')
     # dataloader中的最大work数（线程个数）
-    parser.add_argument('--workers', type=int, default=2, help='max dataloader workers (per RANK in DDP mode)')
+    parser.add_argument('--workers', type=int, default=0, help='max dataloader workers (per RANK in DDP mode)')
     # 训练结果保存的根目录 默认是runs/train
     parser.add_argument('--project', default=ROOT / 'runs/train', help='save to project/name')
     # # 在上面runs/train中,每次启动训练,保存当次训练文件的子文件夹名称
